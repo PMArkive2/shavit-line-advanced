@@ -57,13 +57,15 @@ int g_iColorInts[][] = { //general colors
 #define LINECOLOR 2
 #define ENABLED 3
 #define FLATMODE 4
-#define TRACK_IDX 5
-#define STYLE_IDX 6
-#define CMD_NUM 7
-#define EDIT_ELEMENT 8
-#define EDIT_COLOR 9
+#define GHOSTMODE 5
+#define GHOST_STYLE 6
+#define TRACK_IDX 7
+#define STYLE_IDX 8
+#define CMD_NUM 9
+#define EDIT_ELEMENT 10
+#define EDIT_COLOR 11
 
-#define SETTINGS_NUMBER 5
+#define SETTINGS_NUMBER 7
 
 #define TE_TIME 1.0
 #define TE_MIN 0.5
@@ -87,36 +89,54 @@ enum OSType
 {
 	OSUnknown = 0,
 	OSWindows = 1,
-	OSLinux = 2
+	OSLinux   = 2
 };
+
+enum {
+	GS_RACE  = 0,
+	GS_ROUTE = 1,
+	GS_GUIDE = 2
+}
 
 OSType gOSType;
 EngineVersion gEngineVer;
 
 int sprite;
 ArrayList g_hReplayFrames[STYLE_LIMIT][TRACKS_SIZE];
+ArrayList g_hReplayFrames_Guide[STYLE_LIMIT][TRACKS_SIZE];
+int g_iReplayPreFrames[STYLE_LIMIT][TRACKS_SIZE];
 ClosestPos g_hClosestPos[STYLE_LIMIT][TRACKS_SIZE];
+ClosestPos g_hClosestPos_Guide[STYLE_LIMIT][TRACKS_SIZE];
 
-int g_iIntCache[MAXPLAYERS + 1][10];
+int g_iIntCache[MAXPLAYERS + 1][12];
 Cookie g_hSettings[SETTINGS_NUMBER];
 
 int gTELimitData;
 Address gTELimitAddress;
 
+int gI_ClientPrevFrame[MAXPLAYERS + 1];
+int gI_MaxRecaculateFrameDiff;
+int gI_GuideFramesAhead;
+int gI_Tickrate;
+
 public Plugin myinfo = {
 	name = "shavit-line-advanced",
 	author = "enimmy / NekoGan",
 	description = "Shows the WR route with a path on the ground. Use the command sm_line to toggle.",
-	version = "0.3",
+	version = "0.4",
 	url = "https://github.com/TeasOfficial/shavit-line-advanced"
 };
 
 public void OnPluginStart() {
+	gI_Tickrate = RoundToNearest(1.0 / GetTickInterval());
+
 	g_hSettings[DUCKCOLOR] = new Cookie("shavit_line_duckcolor", "", CookieAccess_Private);
 	g_hSettings[NODUCKCOLOR] = new Cookie("shavit_line_noduckcolor", "", CookieAccess_Private);
 	g_hSettings[LINECOLOR] = new Cookie("shavit_line_linecolor", "", CookieAccess_Private);
 	g_hSettings[ENABLED] = new Cookie("shavit_line_enabled", "", CookieAccess_Private);
 	g_hSettings[FLATMODE] = new Cookie("shavit_line_flatmode", "", CookieAccess_Private);
+	g_hSettings[GHOSTMODE] = new Cookie("shavit_line_ghostmode", "", CookieAccess_Private);
+	g_hSettings[GHOST_STYLE] = new Cookie("shavit_line_ghoststyle", "", CookieAccess_Private);
 
 	RegConsoleCmd("sm_line", LineCmd);
 
@@ -202,12 +222,17 @@ public void Shavit_OnReplaysLoaded() {
 
 public void LoadReplay(int style, int track) {
 	delete g_hClosestPos[style][track];
+	delete g_hClosestPos_Guide[style][track];
 	delete g_hReplayFrames[style][track];
+	delete g_hReplayFrames_Guide[style][track];
+	g_iReplayPreFrames[style][track] = 0;
+
 	ArrayList list = Shavit_GetReplayFrames(style, track, true);
 	g_hReplayFrames[style][track] = new ArrayList(sizeof(frame_t));
+	g_hReplayFrames_Guide[style][track] = new ArrayList(sizeof(frame_t));
+	g_iReplayPreFrames[style][track] = Shavit_GetReplayPreFrames(style, track);
 
 	if(!list) {
-		LogError("Shavit-Line: Couldn't load replay on Style: %i Track: %i", style, track);
 		return;
 	}
 
@@ -223,12 +248,15 @@ public void LoadReplay(int style, int track) {
 			hitGround = false;
 		}
 
+		g_hReplayFrames_Guide[style][track].PushArray(aFrame);
+
 		if (hitGround || i % SKIPFRAMES == 0) {
 			g_hReplayFrames[style][track].PushArray(aFrame);
 		}
 	}
 
 	g_hClosestPos[style][track] = new ClosestPos(g_hReplayFrames[style][track], 0, 0, Shavit_GetReplayFrameCount(style, track));
+	g_hClosestPos_Guide[style][track] = new ClosestPos(g_hReplayFrames_Guide[style][track], 0, 0, Shavit_GetReplayFrameCount(style, track));
 	delete list;
 }
 
@@ -243,6 +271,9 @@ public void Shavit_OnReplaySaved(int client, int style, float time, int jumps, i
 
 public void OnConfigsExecuted() {
 	sprite = PrecacheModel("sprites/laserbeam.vmt");
+
+	gI_MaxRecaculateFrameDiff = RoundToNearest(3.0 * gI_Tickrate);
+	gI_GuideFramesAhead = RoundToNearest(1.5 * gI_Tickrate);
 }
 
 Action LineCmd(int client, int args) {
@@ -258,10 +289,12 @@ void ShowToggleMenu(int client) {
 	SetMenuTitle(menu, "｢ Shavit Line Advanced ｣");
 	AddMenuItem(menu, "linetoggle", (g_iIntCache[client][ENABLED]) ? "[x] Enabled":"[ ] Enabled");
 	AddMenuItem(menu, "flatmode", (g_iIntCache[client][FLATMODE]) ? "[x] Flat Mode":"[ ] Flat Mode");
+	AddMenuItem(menu, "ghosttoggle", (g_iIntCache[client][GHOSTMODE]) ? "[x] Guide Mode":"[ ] Guide Mode");
 
 	char sMessage[256];
 	Shavit_GetStyleStrings(g_iIntCache[client][STYLE_IDX], sStyleName, sMessage, sizeof(sMessage));
 	Format(sMessage, sizeof(sMessage), "Style: %s", sMessage);
+
 	AddMenuItem(menu, "style", sMessage);
 	AddMenuItem(menu, "colors", "Colors");
 	DisplayMenu(menu, client, MENU_TIME_FOREVER);
@@ -286,8 +319,11 @@ public int LinesMenu_Callback (Menu menu, MenuAction action, int client, int opt
 			PushCookies(client);
 		}
 		else if(StrEqual(info, "flatmode")) {
-			g_iIntCache[client][FLATMODE] = !g_iIntCache[client][FLATMODE];
-
+			if(g_iIntCache[client][GHOSTMODE]){
+				Shavit_PrintToChat(client, "FlatMode disabled by GuideMode, please turn off GuideMode first!");
+			}else{
+				g_iIntCache[client][FLATMODE] = !g_iIntCache[client][FLATMODE];
+			}
 			PushCookies(client);
 		}
 		else if(StrEqual(info, "style")) {
@@ -305,6 +341,17 @@ public int LinesMenu_Callback (Menu menu, MenuAction action, int client, int opt
 		else if (StrEqual(info, "colors")) {
 			ShowColorOptionsMenu(client);
 			return 0;
+		}else if (StrEqual(info, "ghosttoggle")) {
+			g_iIntCache[client][GHOSTMODE] = !g_iIntCache[client][GHOSTMODE];
+			
+			if(g_iIntCache[client][GHOSTMODE]){
+				Shavit_PrintToChat(client, "Guide mode can display the best recorded route in server.");
+				if(g_iIntCache[client][FLATMODE]){
+					Shavit_PrintToChat(client, "FlatMode automatic disabled by GuideMode");
+					g_iIntCache[client][FLATMODE] = 0;
+				}
+			}
+			PushCookies(client);
 		}
 		ShowToggleMenu(client);
 	}
@@ -381,53 +428,109 @@ void SetCookie(int client, Cookie hCookie, int n) {
 	SetClientCookie(client, hCookie, strCookie);
 }
 
-public Action OnPlayerRunCmd(int client) {
+public void OnPlayerRunCmdPost(int client) {
 	if (!IsValidClient(client) || !g_iIntCache[client][ENABLED]) {
-		return Plugin_Continue;
+		return;
 	}
 
-	if ((++g_iIntCache[client][CMD_NUM] % 60) != 0) {
-		return Plugin_Continue;
-	}
-
-	g_iIntCache[client][CMD_NUM] = 0;
-	ArrayList list = g_hReplayFrames[g_iIntCache[client][STYLE_IDX]][g_iIntCache[client][TRACK_IDX]];
-	if (list.Length == 0) {
-		return Plugin_Continue;
-	}
+	int closeframeC;
+	ArrayList list;
+	int closeframe;
 
 	float pos[3];
 	GetClientAbsOrigin(client, pos);
-	int closeframe = max(0, (g_hClosestPos[g_iIntCache[client][STYLE_IDX]][g_iIntCache[client][TRACK_IDX]].Find(pos)) - 30);
-	int endframe = min(list.Length, closeframe + 125);
+
+	if(!g_iIntCache[client][GHOSTMODE]){
+		if ((++g_iIntCache[client][CMD_NUM] % 60) != 0) {
+			return;
+		}
+		closeframeC = 30;
+		list = g_hReplayFrames[g_iIntCache[client][STYLE_IDX]][g_iIntCache[client][TRACK_IDX]];
+		closeframe = max(0, (g_hClosestPos[g_iIntCache[client][STYLE_IDX]][g_iIntCache[client][TRACK_IDX]].Find(pos)) - closeframeC);
+	}else{
+		closeframeC = 0;
+		list = g_hReplayFrames_Guide[g_iIntCache[client][STYLE_IDX]][g_iIntCache[client][TRACK_IDX]];
+		closeframe = max(0, (g_hClosestPos_Guide[g_iIntCache[client][STYLE_IDX]][g_iIntCache[client][TRACK_IDX]].Find(pos)) - closeframeC);
+	}
+
+	g_iIntCache[client][CMD_NUM] = 0;
+	if (list.Length == 0 || !list) {
+		return;
+	}
 
 	int flags;
-	frame_t aFrame;
-	list.GetArray(closeframe, aFrame, sizeof(frame_t));
-	pos = aFrame.pos;
-	bool firstFlatDraw = true;
-	for(int i = closeframe; i < endframe; i++) {
-		list.GetArray(i, aFrame, 8);
-		aFrame.pos[2] += 2.5;
-		if(aFrame.flags & FL_ONGROUND && !(flags & FL_ONGROUND)) {
-			DrawBox(client, aFrame.pos, g_iColorInts[g_iIntCache[client][(flags & FL_DUCKING) ? DUCKCOLOR:NODUCKCOLOR]]);
 
-			if(!firstFlatDraw) {
-				DrawBeam(client, pos, aFrame.pos, TE_TIME, TE_MIN, TE_MAX, g_iColorInts[g_iIntCache[client][LINECOLOR]], 0.0, 0);
+	if(g_iIntCache[client][GHOSTMODE]) {
+		if(g_iIntCache[client][GHOST_STYLE] == 0){
+			frame_t curFrame, prevFrame;
+
+			if(closeframe == gI_ClientPrevFrame[client]){
+				gI_ClientPrevFrame[client] = closeframe;
+				return;
 			}
 
-			firstFlatDraw = false;
-			pos = aFrame.pos;
-		}
+			int closeframediff = closeframe - gI_ClientPrevFrame[client];
 
-		if(!g_iIntCache[client][FLATMODE]) {
-			DrawBeam(client, pos, aFrame.pos, TE_TIME, TE_MIN, TE_MAX, g_iColorInts[g_iIntCache[client][LINECOLOR]], 0.0, 0);
-			pos = aFrame.pos;
-		}
+			if(Abs(closeframediff) > gI_MaxRecaculateFrameDiff){
+				gI_ClientPrevFrame[client] = closeframe;
+			}else if(closeframediff > 1){
+				closeframe = gI_ClientPrevFrame[client] + 1;
+			}
 
-		flags = aFrame.flags;
+			gI_ClientPrevFrame[client] = closeframe;
+			if(closeframediff < 0) return;
+			
+			int iMaxFrames;
+			if(closeframediff < g_iReplayPreFrames[g_iIntCache[client][STYLE_IDX]][g_iIntCache[client][TRACK_IDX]]){
+				iMaxFrames = closeframe + gI_GuideFramesAhead / 2;
+			}else{
+				iMaxFrames = closeframe + gI_GuideFramesAhead;
+			}
+
+			if(closeframe >= list.Length){
+				return;
+			}else if(iMaxFrames >= list.Length){
+				iMaxFrames = list.Length - 2;
+			}
+
+			list.GetArray(iMaxFrames, curFrame, sizeof(frame_t));
+			list.GetArray(iMaxFrames <= 0 ? 0 : iMaxFrames - 1, prevFrame, sizeof(frame_t));
+
+			DrawBeam(client, prevFrame.pos, curFrame.pos, TE_TIME, TE_MIN, TE_MAX, g_iColorInts[g_iIntCache[client][LINECOLOR]], 0.0, 0);
+			if((curFrame.flags & FL_ONGROUND) && !(prevFrame.flags & FL_ONGROUND)){
+				DrawBox(client, prevFrame.pos, g_iColorInts[g_iIntCache[client][(flags & FL_DUCKING) ? DUCKCOLOR:NODUCKCOLOR]]);
+			}
+		}
+	}else{
+		int endframe = min(list.Length, closeframe + 125);
+
+		frame_t aFrame;
+		list.GetArray(closeframe, aFrame, sizeof(frame_t));
+		pos = aFrame.pos;
+		bool firstFlatDraw = true;
+		for(int i = closeframe; i < endframe; i++) {
+			list.GetArray(i, aFrame, 8);
+			aFrame.pos[2] += 2.5;
+			if(aFrame.flags & FL_ONGROUND && !(flags & FL_ONGROUND)) {
+				DrawBox(client, aFrame.pos, g_iColorInts[g_iIntCache[client][(flags & FL_DUCKING) ? DUCKCOLOR:NODUCKCOLOR]]);
+
+				if(!firstFlatDraw) {
+					DrawBeam(client, pos, aFrame.pos, TE_TIME, TE_MIN, TE_MAX, g_iColorInts[g_iIntCache[client][LINECOLOR]], 0.0, 0);
+				}
+
+				firstFlatDraw = false;
+				pos = aFrame.pos;
+			}
+
+			if(!g_iIntCache[client][FLATMODE]) {
+				DrawBeam(client, pos, aFrame.pos, TE_TIME, TE_MIN, TE_MAX, g_iColorInts[g_iIntCache[client][LINECOLOR]], 0.0, 0);
+				pos = aFrame.pos;
+			}
+
+			flags = aFrame.flags;
+		}
 	}
-	return Plugin_Continue;
+	return;
 }
 
 float box_offset[4][2] = {
@@ -469,6 +572,10 @@ int min(int a, int b) {
 
 int max(int a, int b) {
 	return a > b ? a : b;
+}
+
+int Abs(int num) {
+	return num > 0 ? num : -num;
 }
 
 void UpdateTrackStyle(int client) {
