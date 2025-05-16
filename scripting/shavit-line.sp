@@ -58,14 +58,13 @@ int g_iColorInts[][] = { //general colors
 #define ENABLED 3
 #define FLATMODE 4
 #define GHOSTMODE 5
-#define GHOST_STYLE 6
-#define TRACK_IDX 7
-#define STYLE_IDX 8
-#define CMD_NUM 9
-#define EDIT_ELEMENT 10
-#define EDIT_COLOR 11
+#define TRACK_IDX 6
+#define STYLE_IDX 7
+#define CMD_NUM 8
+#define EDIT_ELEMENT 9
+#define EDIT_COLOR 10
 
-#define SETTINGS_NUMBER 7
+#define SETTINGS_NUMBER 6
 
 #define TE_TIME 1.0
 #define TE_MIN 0.5
@@ -108,7 +107,7 @@ int g_iReplayPreFrames[STYLE_LIMIT][TRACKS_SIZE];
 ClosestPos g_hClosestPos[STYLE_LIMIT][TRACKS_SIZE];
 ClosestPos g_hClosestPos_Guide[STYLE_LIMIT][TRACKS_SIZE];
 
-int g_iIntCache[MAXPLAYERS + 1][12];
+int g_iIntCache[MAXPLAYERS + 1][11];
 Cookie g_hSettings[SETTINGS_NUMBER];
 
 int gTELimitData;
@@ -136,7 +135,6 @@ public void OnPluginStart() {
 	g_hSettings[ENABLED] = new Cookie("shavit_line_enabled", "", CookieAccess_Private);
 	g_hSettings[FLATMODE] = new Cookie("shavit_line_flatmode", "", CookieAccess_Private);
 	g_hSettings[GHOSTMODE] = new Cookie("shavit_line_ghostmode", "", CookieAccess_Private);
-	g_hSettings[GHOST_STYLE] = new Cookie("shavit_line_ghoststyle", "", CookieAccess_Private);
 
 	RegConsoleCmd("sm_line", LineCmd);
 
@@ -256,7 +254,7 @@ public void LoadReplay(int style, int track) {
 	}
 
 	g_hClosestPos[style][track] = new ClosestPos(g_hReplayFrames[style][track], 0, 0, Shavit_GetReplayFrameCount(style, track));
-	g_hClosestPos_Guide[style][track] = new ClosestPos(g_hReplayFrames_Guide[style][track], 0, 0, Shavit_GetReplayFrameCount(style, track));
+	g_hClosestPos_Guide[style][track] = new ClosestPos(g_hReplayFrames_Guide[style][track], 0, 0, Shavit_GetReplayFrames(style, track).Length - Shavit_GetReplayPostFrames(style, track));
 	delete list;
 }
 
@@ -440,18 +438,29 @@ public void OnPlayerRunCmdPost(int client) {
 	float pos[3];
 	GetClientAbsOrigin(client, pos);
 
+	int closepos;
+
 	if(!g_iIntCache[client][GHOSTMODE]){
 		if ((++g_iIntCache[client][CMD_NUM] % 60) != 0) {
 			return;
 		}
 		closeframeC = 30;
 		list = g_hReplayFrames[g_iIntCache[client][STYLE_IDX]][g_iIntCache[client][TRACK_IDX]];
-		closeframe = max(0, (g_hClosestPos[g_iIntCache[client][STYLE_IDX]][g_iIntCache[client][TRACK_IDX]].Find(pos)) - closeframeC);
+		closepos = g_hClosestPos[g_iIntCache[client][STYLE_IDX]][g_iIntCache[client][TRACK_IDX]].Find(pos);
+		if(!closepos){
+			return;
+		}
 	}else{
 		closeframeC = 0;
 		list = g_hReplayFrames_Guide[g_iIntCache[client][STYLE_IDX]][g_iIntCache[client][TRACK_IDX]];
-		closeframe = max(0, (g_hClosestPos_Guide[g_iIntCache[client][STYLE_IDX]][g_iIntCache[client][TRACK_IDX]].Find(pos)) - closeframeC);
+		closepos = g_hClosestPos_Guide[g_iIntCache[client][STYLE_IDX]][g_iIntCache[client][TRACK_IDX]].Find(pos);
+		
 	}
+
+	if(!closepos){
+		return;
+	}
+	closeframe = max(0, closepos - closeframeC);
 
 	g_iIntCache[client][CMD_NUM] = 0;
 	if (list.Length == 0 || !list) {
@@ -461,45 +470,43 @@ public void OnPlayerRunCmdPost(int client) {
 	int flags;
 
 	if(g_iIntCache[client][GHOSTMODE]) {
-		if(g_iIntCache[client][GHOST_STYLE] == 0){
-			frame_t curFrame, prevFrame;
+		frame_t curFrame, prevFrame;
 
-			if(closeframe == gI_ClientPrevFrame[client]){
-				gI_ClientPrevFrame[client] = closeframe;
-				return;
-			}
-
-			int closeframediff = closeframe - gI_ClientPrevFrame[client];
-
-			if(Abs(closeframediff) > gI_MaxRecaculateFrameDiff){
-				gI_ClientPrevFrame[client] = closeframe;
-			}else if(closeframediff > 1){
-				closeframe = gI_ClientPrevFrame[client] + 1;
-			}
-
+		if(closeframe == gI_ClientPrevFrame[client]){
 			gI_ClientPrevFrame[client] = closeframe;
-			if(closeframediff < 0) return;
+			return;
+		}
+
+		int closeframediff = closeframe - gI_ClientPrevFrame[client];
+
+		if(Abs(closeframediff) > gI_MaxRecaculateFrameDiff){
+			gI_ClientPrevFrame[client] = closeframe;
+		}else if(closeframediff > 1){
+			closeframe = gI_ClientPrevFrame[client] + 1;
+		}
+
+		gI_ClientPrevFrame[client] = closeframe;
+		if(closeframediff < 0) return;
 			
-			int iMaxFrames;
-			if(closeframediff < g_iReplayPreFrames[g_iIntCache[client][STYLE_IDX]][g_iIntCache[client][TRACK_IDX]]){
-				iMaxFrames = closeframe + gI_GuideFramesAhead / 2;
-			}else{
-				iMaxFrames = closeframe + gI_GuideFramesAhead;
-			}
+		int iMaxFrames;
+		if(closeframediff < g_iReplayPreFrames[g_iIntCache[client][STYLE_IDX]][g_iIntCache[client][TRACK_IDX]]){
+			iMaxFrames = closeframe + gI_GuideFramesAhead / 2;
+		}else{
+			iMaxFrames = closeframe + gI_GuideFramesAhead;
+		}
 
-			if(closeframe >= list.Length){
-				return;
-			}else if(iMaxFrames >= list.Length){
-				iMaxFrames = list.Length - 2;
-			}
+		if(closeframe >= list.Length){
+			return;
+		}else if(iMaxFrames >= list.Length){
+			iMaxFrames = list.Length - 2;
+		}
 
-			list.GetArray(iMaxFrames, curFrame, sizeof(frame_t));
-			list.GetArray(iMaxFrames <= 0 ? 0 : iMaxFrames - 1, prevFrame, sizeof(frame_t));
+		list.GetArray(iMaxFrames, curFrame, sizeof(frame_t));
+		list.GetArray(iMaxFrames <= 0 ? 0 : iMaxFrames - 1, prevFrame, sizeof(frame_t));
 
-			DrawBeam(client, prevFrame.pos, curFrame.pos, TE_TIME, TE_MIN, TE_MAX, g_iColorInts[g_iIntCache[client][LINECOLOR]], 0.0, 0);
-			if((curFrame.flags & FL_ONGROUND) && !(prevFrame.flags & FL_ONGROUND)){
-				DrawBox(client, prevFrame.pos, g_iColorInts[g_iIntCache[client][(flags & FL_DUCKING) ? DUCKCOLOR:NODUCKCOLOR]]);
-			}
+		DrawBeam(client, prevFrame.pos, curFrame.pos, TE_TIME, TE_MIN, TE_MAX, g_iColorInts[g_iIntCache[client][LINECOLOR]], 0.0, 0);
+		if((curFrame.flags & FL_ONGROUND) && !(prevFrame.flags & FL_ONGROUND)){
+			DrawBox(client, prevFrame.pos, g_iColorInts[g_iIntCache[client][(prevFrame.flags & FL_DUCKING) ? DUCKCOLOR:NODUCKCOLOR]]);
 		}
 	}else{
 		int endframe = min(list.Length, closeframe + 125);
