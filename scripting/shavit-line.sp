@@ -58,13 +58,14 @@ int g_iColorInts[][] = { //general colors
 #define ENABLED 3
 #define FLATMODE 4
 #define GHOSTMODE 5
-#define TRACK_IDX 6
-#define STYLE_IDX 7
-#define CMD_NUM 8
-#define EDIT_ELEMENT 9
-#define EDIT_COLOR 10
+#define LINE_WIDTH 6
+#define TRACK_IDX 7
+#define STYLE_IDX 8
+#define CMD_NUM 9
+#define EDIT_ELEMENT 10
+#define EDIT_COLOR 11
 
-#define SETTINGS_NUMBER 6
+#define SETTINGS_NUMBER 7
 
 #define TE_TIME 1.0
 #define TE_MIN 0.5
@@ -107,7 +108,7 @@ int g_iReplayPreFrames[STYLE_LIMIT][TRACKS_SIZE];
 ClosestPos g_hClosestPos[STYLE_LIMIT][TRACKS_SIZE];
 ClosestPos g_hClosestPos_Guide[STYLE_LIMIT][TRACKS_SIZE];
 
-int g_iIntCache[MAXPLAYERS + 1][11];
+int g_iIntCache[MAXPLAYERS + 1][12];
 Cookie g_hSettings[SETTINGS_NUMBER];
 
 int gTELimitData;
@@ -135,6 +136,7 @@ public void OnPluginStart() {
 	g_hSettings[ENABLED] = new Cookie("shavit_line_enabled", "", CookieAccess_Private);
 	g_hSettings[FLATMODE] = new Cookie("shavit_line_flatmode", "", CookieAccess_Private);
 	g_hSettings[GHOSTMODE] = new Cookie("shavit_line_ghostmode", "", CookieAccess_Private);
+	g_hSettings[LINE_WIDTH] = new Cookie("shavit_line_width", "1", CookieAccess_Private);
 
 	RegConsoleCmd("sm_line", LineCmd);
 
@@ -295,6 +297,7 @@ void ShowToggleMenu(int client) {
 
 	AddMenuItem(menu, "style", sMessage);
 	AddMenuItem(menu, "colors", "Colors");
+	AddMenuItem(menu, "widths", "Line Width");
 	DisplayMenu(menu, client, MENU_TIME_FOREVER);
 }
 
@@ -339,6 +342,9 @@ public int LinesMenu_Callback (Menu menu, MenuAction action, int client, int opt
 		else if (StrEqual(info, "colors")) {
 			ShowColorOptionsMenu(client);
 			return 0;
+		}else if (StrEqual(info, "widths")) {
+			ShowWidthOptionsMenu(client);
+			return 0;
 		}else if (StrEqual(info, "ghosttoggle")) {
 			g_iIntCache[client][GHOSTMODE] = !g_iIntCache[client][GHOSTMODE];
 			
@@ -370,6 +376,48 @@ void ShowColorOptionsMenu(int client) {
 	Format(sMessage, sizeof(sMessage), "Color: %s", g_sColorStrs[g_iIntCache[client][g_iIntCache[client][EDIT_ELEMENT]]]);
 	AddMenuItem(menu, "editcolor", sMessage);
 	DisplayMenu(menu, client, MENU_TIME_FOREVER);
+}
+
+void ShowWidthOptionsMenu(int client) {
+	Menu menu = CreateMenu(LinesWidth_Callback);
+	SetMenuTitle(menu, "Widths\n\n");
+	char sMessage[256];
+
+	Format(sMessage, sizeof(sMessage), " + 1.0");
+	AddMenuItem(menu, "add", sMessage);
+	Format(sMessage, sizeof(sMessage), "< Width: %d >", g_iIntCache[client][LINE_WIDTH] ? g_iIntCache[client][LINE_WIDTH] : 1);
+	AddMenuItem(menu, "show_width", sMessage, 1);
+	Format(sMessage, sizeof(sMessage), " - 1.0");
+	AddMenuItem(menu, "del", sMessage);
+
+	DisplayMenu(menu, client, MENU_TIME_FOREVER);
+}
+
+public int LinesWidth_Callback(Menu menu, MenuAction action, int client, int option) {
+	if (action == MenuAction_Select) {
+		char info[32];
+		GetMenuItem(menu, option, info, sizeof(info));
+
+		if(g_iIntCache[client][LINE_WIDTH] <= 0){
+			g_iIntCache[client][LINE_WIDTH] = 1;
+		}
+		if(StrEqual(info, "add")){
+			if(10 > g_iIntCache[client][LINE_WIDTH]){
+				g_iIntCache[client][LINE_WIDTH]++;
+			}
+		}else
+		if(StrEqual(info, "del")){
+			if(g_iIntCache[client][LINE_WIDTH] > 1){
+				g_iIntCache[client][LINE_WIDTH]--;
+			}
+		}
+		PushCookies(client);
+		ShowWidthOptionsMenu(client);
+	}else
+	if (action == MenuAction_End) {
+		delete menu;
+	}
+	return 0;
 }
 
 public int LinesColors_Callback(Menu menu, MenuAction action, int client, int option) {
@@ -446,7 +494,7 @@ public void OnPlayerRunCmdPost(int client) {
 		}
 		closeframeC = 30;
 		list = g_hReplayFrames[g_iIntCache[client][STYLE_IDX]][g_iIntCache[client][TRACK_IDX]];
-		closepos = g_hClosestPos[g_iIntCache[client][STYLE_IDX]][g_iIntCache[client][TRACK_IDX]].Find(pos);
+		closepos = g_hClosestPos[g_iIntCache[client][STYLE_IDX]][g_iIntCache[client][TRACK_IDX]].Find(pos ? pos : {0.0, 0.0, 0.0});
 		if(!closepos){
 			return;
 		}
@@ -504,7 +552,7 @@ public void OnPlayerRunCmdPost(int client) {
 		list.GetArray(iMaxFrames, curFrame, sizeof(frame_t));
 		list.GetArray(iMaxFrames <= 0 ? 0 : iMaxFrames - 1, prevFrame, sizeof(frame_t));
 
-		DrawBeam(client, prevFrame.pos, curFrame.pos, TE_TIME, TE_MIN, TE_MAX, g_iColorInts[g_iIntCache[client][LINECOLOR]], 0.0, 0);
+		DrawBeam(client, prevFrame.pos, curFrame.pos, TE_TIME, g_iIntCache[client][LINE_WIDTH] * 1.0, g_iIntCache[client][LINE_WIDTH] * 1.0, g_iColorInts[g_iIntCache[client][LINECOLOR]], 0.0, 0);
 		if((curFrame.flags & FL_ONGROUND) && !(prevFrame.flags & FL_ONGROUND)){
 			DrawBox(client, prevFrame.pos, g_iColorInts[g_iIntCache[client][(prevFrame.flags & FL_DUCKING) ? DUCKCOLOR:NODUCKCOLOR]]);
 		}
@@ -522,7 +570,7 @@ public void OnPlayerRunCmdPost(int client) {
 				DrawBox(client, aFrame.pos, g_iColorInts[g_iIntCache[client][(flags & FL_DUCKING) ? DUCKCOLOR:NODUCKCOLOR]]);
 
 				if(!firstFlatDraw) {
-					DrawBeam(client, pos, aFrame.pos, TE_TIME, TE_MIN, TE_MAX, g_iColorInts[g_iIntCache[client][LINECOLOR]], 0.0, 0);
+					DrawBeam(client, pos, aFrame.pos, TE_TIME, g_iIntCache[client][LINE_WIDTH] * 1.0, g_iIntCache[client][LINE_WIDTH] * 1.0, g_iColorInts[g_iIntCache[client][LINECOLOR]], 0.0, 0);
 				}
 
 				firstFlatDraw = false;
@@ -530,7 +578,7 @@ public void OnPlayerRunCmdPost(int client) {
 			}
 
 			if(!g_iIntCache[client][FLATMODE]) {
-				DrawBeam(client, pos, aFrame.pos, TE_TIME, TE_MIN, TE_MAX, g_iColorInts[g_iIntCache[client][LINECOLOR]], 0.0, 0);
+				DrawBeam(client, pos, aFrame.pos, TE_TIME, g_iIntCache[client][LINE_WIDTH] * 1.0, g_iIntCache[client][LINE_WIDTH] * 1.0, g_iColorInts[g_iIntCache[client][LINECOLOR]], 0.0, 0);
 				pos = aFrame.pos;
 			}
 
