@@ -114,6 +114,7 @@ Cookie g_hSettings[SETTINGS_NUMBER];
 int gTELimitData;
 Address gTELimitAddress;
 
+int gI_LastOriginalFrameDiff[MAXPLAYERS + 1];
 int gI_ClientPrevFrame[MAXPLAYERS + 1];
 int gI_MaxRecaculateFrameDiff;
 int gI_GuideFramesAhead;
@@ -514,9 +515,6 @@ public void OnPlayerRunCmdPost(int client) {
 		return;
 	}
 
-	char sMessage[256];
-	Shavit_GetStyleStrings(g_iIntCache[client][STYLE_IDX], sStyleName, sMessage, sizeof(sMessage));
-
 	int closeframeC;
 	ArrayList list;
 	int closeframe;
@@ -567,12 +565,15 @@ public void OnPlayerRunCmdPost(int client) {
 		}
 
 		int closeframediff = closeframe - gI_ClientPrevFrame[client];
+		int iOriginalClosestFrame = closeframe;
+		int iDrawFrameOffset = 1;
 
 		if(Abs(closeframediff) > gI_MaxRecaculateFrameDiff){
 			gI_ClientPrevFrame[client] = closeframe;
 		}else
 		if(closeframediff > 1){
-			closeframe = gI_ClientPrevFrame[client] + 1;
+			iDrawFrameOffset = RoundToCeil((gI_LastOriginalFrameDiff[client] * 1.0) / (gI_GuideFramesAhead / 2));
+			closeframe = gI_ClientPrevFrame[client] + iDrawFrameOffset;
 		}
 
 		gI_ClientPrevFrame[client] = closeframe;
@@ -586,6 +587,8 @@ public void OnPlayerRunCmdPost(int client) {
 			iMaxFrames = closeframe + gI_GuideFramesAhead;
 		}
 
+		gI_LastOriginalFrameDiff[client] = gI_GuideFramesAhead - iMaxFrames + iOriginalClosestFrame;
+
 		if(closeframe >= list.Length){
 			return;
 		}else if(iMaxFrames >= list.Length){
@@ -593,7 +596,7 @@ public void OnPlayerRunCmdPost(int client) {
 		}
 
 		list.GetArray(iMaxFrames, curFrame, sizeof(frame_t));
-		list.GetArray(iMaxFrames <= 0 ? 0 : iMaxFrames - 1, prevFrame, sizeof(frame_t));
+		list.GetArray(iMaxFrames <= iDrawFrameOffset ? 0 : iMaxFrames - iDrawFrameOffset, prevFrame, sizeof(frame_t));
 
 		DrawBeam(client, prevFrame.pos, curFrame.pos, TE_TIME, g_iIntCache[client][LINE_WIDTH] * 1.0, g_iIntCache[client][LINE_WIDTH] * 1.0, g_iColorInts[g_iIntCache[client][LINECOLOR]], 0.0, 0);
 		if((curFrame.flags & FL_ONGROUND) && !(prevFrame.flags & FL_ONGROUND)){
