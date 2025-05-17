@@ -123,7 +123,7 @@ public Plugin myinfo = {
 	name = "shavit-line-advanced",
 	author = "enimmy / NekoGan",
 	description = "Shows the WR route with a path on the ground. Use the command sm_line to toggle.",
-	version = "0.4",
+	version = "0.5",
 	url = "https://github.com/TeasOfficial/shavit-line-advanced"
 };
 
@@ -136,7 +136,7 @@ public void OnPluginStart() {
 	g_hSettings[ENABLED] = new Cookie("shavit_line_enabled", "", CookieAccess_Private);
 	g_hSettings[FLATMODE] = new Cookie("shavit_line_flatmode", "", CookieAccess_Private);
 	g_hSettings[GHOSTMODE] = new Cookie("shavit_line_ghostmode", "", CookieAccess_Private);
-	g_hSettings[LINE_WIDTH] = new Cookie("shavit_line_width", "1", CookieAccess_Private);
+	g_hSettings[LINE_WIDTH] = new Cookie("shavit_line_width", "", CookieAccess_Private);
 
 	RegConsoleCmd("sm_line", LineCmd);
 
@@ -228,6 +228,7 @@ public void LoadReplay(int style, int track) {
 	g_iReplayPreFrames[style][track] = 0;
 
 	ArrayList list = Shavit_GetReplayFrames(style, track, true);
+
 	g_hReplayFrames[style][track] = new ArrayList(sizeof(frame_t));
 	g_hReplayFrames_Guide[style][track] = new ArrayList(sizeof(frame_t));
 	g_iReplayPreFrames[style][track] = Shavit_GetReplayPreFrames(style, track);
@@ -289,7 +290,7 @@ void ShowToggleMenu(int client) {
 	SetMenuTitle(menu, "｢ Shavit Line Advanced ｣");
 	AddMenuItem(menu, "linetoggle", (g_iIntCache[client][ENABLED]) ? "[x] Enabled":"[ ] Enabled");
 	AddMenuItem(menu, "flatmode", (g_iIntCache[client][FLATMODE]) ? "[x] Flat Mode":"[ ] Flat Mode");
-	AddMenuItem(menu, "ghosttoggle", (g_iIntCache[client][GHOSTMODE]) ? "[x] Guide Mode":"[ ] Guide Mode");
+	AddMenuItem(menu, "showguide", (g_iIntCache[client][GHOSTMODE]) ? "[x] Guide Mode":"[ ] Guide Mode");
 
 	char sMessage[256];
 	Shavit_GetStyleStrings(g_iIntCache[client][STYLE_IDX], sStyleName, sMessage, sizeof(sMessage));
@@ -345,17 +346,9 @@ public int LinesMenu_Callback (Menu menu, MenuAction action, int client, int opt
 		}else if (StrEqual(info, "widths")) {
 			ShowWidthOptionsMenu(client);
 			return 0;
-		}else if (StrEqual(info, "ghosttoggle")) {
-			g_iIntCache[client][GHOSTMODE] = !g_iIntCache[client][GHOSTMODE];
-			
-			if(g_iIntCache[client][GHOSTMODE]){
-				Shavit_PrintToChat(client, "Guide mode can display the best recorded route in server.");
-				if(g_iIntCache[client][FLATMODE]){
-					Shavit_PrintToChat(client, "FlatMode automatic disabled by GuideMode");
-					g_iIntCache[client][FLATMODE] = 0;
-				}
-			}
-			PushCookies(client);
+		}else if (StrEqual(info, "showguide")) {
+			ShowGhostOptionsMenu(client);
+			return 0;
 		}
 		ShowToggleMenu(client);
 	}
@@ -367,7 +360,7 @@ public int LinesMenu_Callback (Menu menu, MenuAction action, int client, int opt
 
 void ShowColorOptionsMenu(int client) {
 	Menu menu = CreateMenu(LinesColors_Callback);
-	SetMenuTitle(menu, "Colors\n\n");
+	SetMenuTitle(menu, "｢ Line Colors ｣\n\n");
 
 	char sMessage[256];
 	Format(sMessage, sizeof(sMessage), "< Editing: %s >", g_sElementStrings[g_iIntCache[client][EDIT_ELEMENT]]);
@@ -380,17 +373,56 @@ void ShowColorOptionsMenu(int client) {
 
 void ShowWidthOptionsMenu(int client) {
 	Menu menu = CreateMenu(LinesWidth_Callback);
-	SetMenuTitle(menu, "Widths\n\n");
+	SetMenuTitle(menu, "｢ Line Widths ｣\n\n");
 	char sMessage[256];
 
-	Format(sMessage, sizeof(sMessage), " + 1.0");
-	AddMenuItem(menu, "add", sMessage);
+	AddMenuItem(menu, "add", " + 1.0");
+
 	Format(sMessage, sizeof(sMessage), "< Width: %d >", g_iIntCache[client][LINE_WIDTH] ? g_iIntCache[client][LINE_WIDTH] : 1);
 	AddMenuItem(menu, "show_width", sMessage, 1);
-	Format(sMessage, sizeof(sMessage), " - 1.0");
-	AddMenuItem(menu, "del", sMessage);
+
+	AddMenuItem(menu, "del", " - 1.0");
 
 	DisplayMenu(menu, client, MENU_TIME_FOREVER);
+}
+
+void ShowGhostOptionsMenu(int client) {
+	Menu menu = CreateMenu(GhostMenu_Callback);
+	SetMenuTitle(menu, "｢ Guide Line ｣\n\n");
+
+	AddMenuItem(menu, "ghosttoggle", (g_iIntCache[client][GHOSTMODE]) ? "[x] Enabled":"[ ] Enabled");
+	AddMenuItem(menu, "back", "Back");
+
+	DisplayMenu(menu, client, MENU_TIME_FOREVER);
+}
+
+public int GhostMenu_Callback(Menu menu, MenuAction action, int client, int option) {
+	if (action == MenuAction_Select) {
+		char info[32];
+		GetMenuItem(menu, option, info, sizeof(info));
+
+		if (StrEqual(info, "ghosttoggle")) {
+			g_iIntCache[client][GHOSTMODE] = !g_iIntCache[client][GHOSTMODE];
+
+			if(g_iIntCache[client][GHOSTMODE]){
+				Shavit_PrintToChat(client, "Guide mode can display the best recorded route in server.");
+				if(g_iIntCache[client][FLATMODE]){
+					Shavit_PrintToChat(client, "FlatMode automatic disabled by GuideMode");
+					g_iIntCache[client][FLATMODE] = 0;
+				}
+			}
+			PushCookies(client);
+		}
+		if (StrEqual(info, "back")) {
+			ShowToggleMenu(client);
+			return 0;
+		}
+		ShowGhostOptionsMenu(client);
+	}else
+	if (action == MenuAction_End) {
+		delete menu;
+	}
+	return 0;
 }
 
 public int LinesWidth_Callback(Menu menu, MenuAction action, int client, int option) {
@@ -458,6 +490,9 @@ void PushDefaultSettings(int client) {
 	g_iIntCache[client][DUCKCOLOR] = Red;
 	g_iIntCache[client][NODUCKCOLOR] = Pink;
 	g_iIntCache[client][LINECOLOR] = White;
+	g_iIntCache[client][GHOSTMODE] = 0;
+	g_iIntCache[client][LINE_WIDTH] = 1;
+	
 	PushCookies(client);
 	UpdateTrackStyle(client);
 }
@@ -479,6 +514,9 @@ public void OnPlayerRunCmdPost(int client) {
 		return;
 	}
 
+	char sMessage[256];
+	Shavit_GetStyleStrings(g_iIntCache[client][STYLE_IDX], sStyleName, sMessage, sizeof(sMessage));
+
 	int closeframeC;
 	ArrayList list;
 	int closeframe;
@@ -488,33 +526,36 @@ public void OnPlayerRunCmdPost(int client) {
 
 	int closepos;
 
+	// GHOSTMODE(Guide) code from bhopppp/Shavit-Surf-Timer
+	// thank u!
+
 	if(!g_iIntCache[client][GHOSTMODE]){
 		if ((++g_iIntCache[client][CMD_NUM] % 60) != 0) {
 			return;
 		}
 		closeframeC = 30;
 		list = g_hReplayFrames[g_iIntCache[client][STYLE_IDX]][g_iIntCache[client][TRACK_IDX]];
-		closepos = g_hClosestPos[g_iIntCache[client][STYLE_IDX]][g_iIntCache[client][TRACK_IDX]].Find(pos ? pos : {0.0, 0.0, 0.0});
+		if (list.Length == 0 || !list) {
+			return;
+		}
+		closepos = g_hClosestPos[g_iIntCache[client][STYLE_IDX]][g_iIntCache[client][TRACK_IDX]].Find(pos);
 		if(!closepos){
 			return;
 		}
 	}else{
 		closeframeC = 0;
 		list = g_hReplayFrames_Guide[g_iIntCache[client][STYLE_IDX]][g_iIntCache[client][TRACK_IDX]];
+		if (list.Length == 0 || !list) {
+			return;
+		}
 		closepos = g_hClosestPos_Guide[g_iIntCache[client][STYLE_IDX]][g_iIntCache[client][TRACK_IDX]].Find(pos);
 		
 	}
 
-	if(!closepos){
-		return;
-	}
 	closeframe = max(0, closepos - closeframeC);
 
 	g_iIntCache[client][CMD_NUM] = 0;
-	if (list.Length == 0 || !list) {
-		return;
-	}
-
+	
 	int flags;
 
 	if(g_iIntCache[client][GHOSTMODE]) {
@@ -529,7 +570,8 @@ public void OnPlayerRunCmdPost(int client) {
 
 		if(Abs(closeframediff) > gI_MaxRecaculateFrameDiff){
 			gI_ClientPrevFrame[client] = closeframe;
-		}else if(closeframediff > 1){
+		}else
+		if(closeframediff > 1){
 			closeframe = gI_ClientPrevFrame[client] + 1;
 		}
 
@@ -537,6 +579,7 @@ public void OnPlayerRunCmdPost(int client) {
 		if(closeframediff < 0) return;
 			
 		int iMaxFrames;
+
 		if(closeframediff < g_iReplayPreFrames[g_iIntCache[client][STYLE_IDX]][g_iIntCache[client][TRACK_IDX]]){
 			iMaxFrames = closeframe + gI_GuideFramesAhead / 2;
 		}else{
