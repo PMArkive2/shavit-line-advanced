@@ -1,3 +1,20 @@
+/*
+
+	We have stopped open-source the source code,
+	if you want the source code for the latest build plugin,
+	please contact me!
+	And promise that the code will not be used for other
+	purposes and will not be submitted to other GitHub repositories!
+
+	Discord: originalsnow.
+	Teas Official 2025/05/17
+
+	Reason: Someone plagiarized my code without
+	proper attribution and submitted it to another
+	person's GitHub repository.
+	
+*/
+
 #pragma semicolon 1
 #pragma newdecls required
 
